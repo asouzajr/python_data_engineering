@@ -145,6 +145,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.venv/
+venv/
 
 # Spyder project settings
 .spyderproject
@@ -210,3 +212,10 @@ __marimo__/
 
 # Arquivos locais
 resources/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

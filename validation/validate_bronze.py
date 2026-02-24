@@ -1,41 +1,53 @@
 import json
 from pathlib import Path
 
-def validate_bronze_file(bronze_path: str):
-    """Valida o arquivo Bronze e imprime informações importantes."""
-    path = Path(bronze_path)
-    if not path.exists():
-        print(f"Erro: arquivo não encontrado em {bronze_path}")
+
+BRONZE_PATH = Path("data/bronze/bronze_jira_issues.json")
+
+
+def validate_bronze():
+    if not BRONZE_PATH.exists():
+        print(f"Arquivo não encontrado: {BRONZE_PATH}")
         return
 
-    with open(path, "r", encoding="utf-8") as f:
-        bronze_data = json.load(f)
+    with open(BRONZE_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-    # Checar chaves principais
-    keys = list(bronze_data.keys())
-    print("Chaves do JSON Bronze:", keys)
+    print("\n===== BRONZE STRUCTURE =====")
 
-    # Checar número de issues
-    issues = bronze_data.get("issues", [])
-    print("Número de issues:", len(issues))
+    # Root level
+    print("\nRoot keys:")
+    for key in data.keys():
+        print(f" - {key} (type: {type(data[key]).__name__})")
 
-    # Checar metadados do projeto
-    project = bronze_data.get("project", {})
-    print("Projeto ID:", project.get("project_id", "N/A"))
-    print("Projeto Name:", project.get("project_name", "N/A"))
-    print("Extraído em:", project.get("extracted_at", "N/A"))
+    # Metadata
+    metadata = data.get("metadata", {})
+    print("\nMetadata:")
+    for key, value in metadata.items():
+        print(f" - {key}: {value}")
 
-    # Mostrar primeira issue como exemplo
+    # Raw data
+    raw_data = data.get("raw_data", {})
+    project = raw_data.get("project", {})
+    issues = raw_data.get("issues", [])
+
+    print("\nProject Info:")
+    for key, value in project.items():
+        print(f" - {key}: {value}")
+
+    print(f"\nTotal issues: {len(issues)}")
+
+    # Show schema of first issue
     if issues:
-        print("\nPrimeira issue:")
+        print("\nFields in first issue:")
+        for key, value in issues[0].items():
+            print(f" - {key} (type: {type(value).__name__})")
+
+        print("\nSample issue:")
         print(json.dumps(issues[0], indent=4))
     else:
         print("Nenhuma issue encontrada.")
 
-def main():
-    # Caminho relativo a partir da raiz do projeto
-    bronze_file = "data/bronze/bronze_jira_issues.json"
-    validate_bronze_file(bronze_file)
 
 if __name__ == "__main__":
-    main()
+    validate_bronze()

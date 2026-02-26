@@ -11,6 +11,7 @@ The implementation follows engineering best practices, including:
 - ISO 8601 timestamp standardization (UTC)
 - Structured logging
 - Environment variable configuration
+- Explicit structural validation between layers
 - Modular execution using `python -m`
 - Clear separation of responsibilities per layer
 
@@ -22,30 +23,37 @@ The pipeline follows the Medallion Architecture pattern:
 
 Raw JSON → Bronze → Silver → Gold (planned)
 
-### 2.1 Bronze Layer – Raw Ingestion
+Each layer has clearly defined responsibilities and validation boundaries.
 
-#### Responsibilities
+---
+
+## 2.1 Bronze Layer – Raw Ingestion
+
+### Responsibilities
 
 - Read raw JSON input
 - Preserve the original data structure
 - Add ingestion metadata
 - Persist data locally
+- Log execution steps
+- Validate file existence before ingestion
 
-#### Characteristics
+### Characteristics
 
 - Raw payload stored under `raw_data`
 - Metadata stored separately
 - Ingestion timestamp in ISO 8601 UTC format
 - No transformation applied
 - Structured logging enabled
+- Fail-fast behavior for missing files
 
-#### Output
+### Output
 
 ```
 data/bronze/bronze_jira_issues.json
 ```
 
-#### Bronze File Structure
+### Bronze File Structure
 
 ```json
 {
@@ -61,36 +69,51 @@ data/bronze/bronze_jira_issues.json
 
 ---
 
-### 2.2 Silver Layer – Data Cleaning and Structuring
+## 2.2 Silver Layer – Data Cleaning and Structuring
 
-#### Responsibilities
+### Responsibilities
 
 - Read Bronze data
+- Validate Bronze structural integrity
 - Normalize nested JSON structures
 - Explode nested lists
 - Extract relevant business fields
 - Convert timestamps to UTC datetime
 - Remove invalid records
-- Persist structured dataset
+- Persist structured dataset in Parquet format
+- Log transformation lifecycle
 
-#### Transformations Applied
+### Structural Validation
+
+Before transformation, the Silver layer validates that:
+
+- `raw_data` exists
+- `raw_data.issues` exists
+
+If the structure is invalid, execution fails explicitly with a descriptive error.
+
+This prevents silent corruption between layers.
+
+### Transformations Applied
 
 - `assignee` list exploded
 - `timestamps` list exploded
 - Extraction of:
-  - assignee name
+  - assignee_name
   - created_at
   - resolved_at
-- Datetime conversion using UTC
+- Column renaming (`id` → `issue_id`)
+- Datetime conversion using `pd.to_datetime(..., utc=True)`
 - Removal of records with invalid `created_at`
+- Explicit logging of record counts
 
-#### Output
+### Output
 
 ```
 data/silver/silver_issues.parquet
 ```
 
-#### Silver Schema
+### Silver Schema
 
 | Column        | Description                              |
 |---------------|------------------------------------------|
@@ -165,6 +188,8 @@ python -m src.bronze.ingest_bronze
 python -m src.silver.transform_silver
 ```
 
+Execution via `-m` ensures proper package resolution and architectural consistency.
+
 ---
 
 ## 5. Technical Standards
@@ -183,6 +208,8 @@ Example:
 2026-02-23T19:03:00Z
 ```
 
+All Silver timestamps are timezone-aware and standardized to UTC.
+
 ---
 
 ### 5.2 Logging
@@ -195,17 +222,24 @@ Example log entry:
 2026-02-23T19:03:53 - INFO - Starting Silver layer transformation...
 ```
 
+Each layer logs:
+
+- Start of execution
+- Record counts
+- Structural validation results
+- Output persistence confirmation
+
 ---
 
-### 5.3 Modular Execution
+### 5.3 Error Handling Strategy
 
-Modules are executed using:
+The pipeline follows a fail-fast principle:
 
-```bash
-python -m package.module
-```
+- Missing files raise explicit exceptions
+- Invalid Bronze structure raises `KeyError`
+- Invalid datetime values are coerced and filtered
 
-This approach ensures proper package resolution and maintains architectural consistency.
+This prevents silent data corruption across layers.
 
 ---
 
@@ -216,14 +250,26 @@ This approach ensures proper package resolution and maintains architectural cons
 The Medallion Architecture was selected to clearly separate responsibilities:
 
 - Bronze: Raw ingestion and immutability
-- Silver: Data cleansing and structuring
+- Silver: Data cleansing, structuring, and schema enforcement
 - Gold: Business logic and SLA calculation (planned)
 
 This separation improves maintainability, traceability, and scalability.
 
 ---
 
-### 6.2 Metadata in Bronze Layer
+### 6.2 Structural Validation Between Layers
+
+The Silver layer explicitly validates Bronze structure before transformation.
+
+This ensures:
+
+- Layer isolation
+- Strong contracts between layers
+- Safer pipeline evolution
+
+---
+
+### 6.3 Metadata in Bronze Layer
 
 Metadata was introduced at the Bronze layer to:
 
@@ -235,30 +281,37 @@ This ensures traceability without altering raw business data.
 
 ---
 
-### 6.3 UTC Standardization
+### 6.4 UTC Standardization
 
 All timestamps are converted to UTC to eliminate timezone inconsistencies and ensure deterministic SLA calculations in the future Gold layer.
 
 ---
 
-### 6.4 Parquet in Silver Layer
+### 6.5 Parquet in Silver Layer
 
 Parquet was selected for the Silver output because:
 
 - It is columnar and efficient
-- It supports schema consistency
+- It enforces schema consistency
 - It is analytics-friendly
 - It reduces storage footprint compared to raw JSON
 
 ---
 
-### 6.5 Environment Variables
+### 6.6 Modular Execution Pattern
 
-Configuration values are externalized via `.env` to:
+The project enforces execution via:
 
-- Decouple configuration from code
-- Improve portability across environments
-- Enable flexible deployment scenarios
+```bash
+python -m package.module
+```
+
+This ensures:
+
+- Proper package resolution
+- Import consistency
+- Avoidance of `ModuleNotFoundError`
+- Architectural discipline
 
 ---
 
@@ -268,7 +321,8 @@ Configuration values are externalized via `.env` to:
 
 The project persists data locally instead of using cloud storage or databases.
 
-**Trade-off:**  
+**Trade-off:**
+
 - Simpler setup  
 - Reduced infrastructure complexity  
 - Not horizontally scalable  
@@ -279,20 +333,22 @@ The project persists data locally instead of using cloud storage or databases.
 
 Pandas was chosen for transformation logic due to its simplicity and expressiveness.
 
-**Trade-off:**  
+**Trade-off:**
+
 - Excellent for moderate datasets  
 - Not distributed  
-- Would need migration to Spark for large-scale processing  
+- Would require migration to Spark for large-scale processing  
 
 ---
 
-### 7.3 Minimal Dependency Strategy
+### 7.3 Fail-Fast Error Handling
 
-Standard library was prioritized when possible.
+The pipeline stops execution on structural inconsistencies.
 
-**Trade-off:**  
-- Reduces dependency overhead  
-- Slightly more manual implementation effort  
+**Trade-off:**
+
+- Safer data guarantees  
+- Slightly stricter development process  
 
 ---
 
@@ -304,8 +360,8 @@ Planned enhancements include:
 - Business hour calculation excluding weekends
 - Integration with Brazilian public holiday API
 - Aggregated reporting layer
-- Automated validation tests
-- Structured logging with file handlers
+- Automated validation test suite
+- CI pipeline with linting and formatting checks
 
 ---
 
@@ -336,8 +392,11 @@ python_data_engineering/
 
 ## 10. Current Status
 
-- Bronze layer implemented
-- Silver layer implemented
+- Bronze layer implemented and standardized
+- Silver layer implemented with structural validation
+- Logging standardized
+- Modular execution enforced
+- Linting applied
 - Gold layer (SLA calculation and reporting) planned
 
 ---
@@ -348,8 +407,10 @@ This project demonstrates:
 
 - Structured data ingestion
 - Controlled data transformation
+- Explicit inter-layer validation
 - Layered architecture design
 - Configuration management via environment variables
 - Logging and operational transparency
+- Clean code discipline (PEP8 / linting)
 
 The next phase will introduce SLA calculation logic and business metrics aggregation within the Gold layer.
